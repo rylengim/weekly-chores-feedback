@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: weekly_chores_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d weekly_chores_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_SECRET_KEY: django-insecure-ci-only
+      DJANGO_ALLOWED_HOSTS: testserver,localhost
+      POSTGRES_DB: weekly_chores_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: 5432
+      DJANGO_LOG_LEVEL: INFO
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.31"
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Run the Django system check
+        run: uv run python manage.py check --settings=config.settings.test
+      - name: Apply migrations
+        run: uv run python manage.py migrate --noinput --settings=config.settings.test
+      - name: Check for unapplied migrations
+        run: uv run python manage.py migrate --check --settings=config.settings.test
+      - name: Check for missing migrations
+        run: uv run python manage.py makemigrations --check --dry-run --settings=config.settings.test
+      - name: Collect static files
+        run: uv run python manage.py collectstatic --noinput --settings=config.settings.test
+      - name: Run the smoke test
+        run: uv run pytest tests/test_home.py
+      - name: Run the complete test suite
+        run: uv run pytest
